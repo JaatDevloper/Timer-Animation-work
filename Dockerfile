@@ -5,6 +5,7 @@ FROM python:3.11-slim
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PORT=5000
+ENV HOST=0.0.0.0
 
 # Set the working directory
 WORKDIR /app
@@ -16,15 +17,26 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the rest of the application
 COPY . .
 
-# Create data directory
-RUN mkdir -p data
+# Create necessary directories
+RUN mkdir -p data templates static
 
-# Healthcheck to ensure application is running
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD python healthcheck.py || exit 1
+# Set up default data if not present
+RUN if [ ! -f "data/questions.json" ]; then echo "[]" > data/questions.json; fi
+RUN if [ ! -f "data/users.json" ]; then echo "{}" > data/users.json; fi
+
+# Make directories writable for the app user
+RUN chmod -R 777 data
+
+# Create a non-root user
+RUN adduser --disabled-password --gecos "" appuser
+USER appuser
 
 # Expose the application port
 EXPOSE $PORT
 
-# Start Gunicorn and the Bot
-CMD gunicorn --bind 0.0.0.0:$PORT --reuse-port main:app & python simple_bot.py
+# Healthcheck to ensure application is running
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:$PORT/health || exit 1
+
+# Start the application using the standalone script
+CMD ["python", "standalone.py"]
