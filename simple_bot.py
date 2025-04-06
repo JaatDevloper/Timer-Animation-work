@@ -616,15 +616,57 @@ async def clone_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if command_args and command_args[0].startswith('http'):
         # If a URL is provided directly with the command
         url = command_args[0]
-        await handle_quiz_url(update, context, url)
+        return await handle_quiz_url(update, context, url)
     else:
         # Otherwise, ask for the URL
         await update.message.reply_text(
             "Please send me the Telegram quiz link you want to clone.\n"
-            "For example, a link from @QuizBot or another quiz bot.\n\n"
+            "For example, a link from @QuizBot or another quiz bot or channel.\n\n"
             "Type /cancel to abort."
         )
         return CLONE_URL
+
+async def handle_quiz_url(update: Update, context: ContextTypes.DEFAULT_TYPE, url=None):
+    """Handle processing a quiz URL"""
+    if not url:
+        url = update.message.text
+    
+    await update.message.reply_text("Analyzing the quiz link... Please wait.")
+    
+    # Parse the URL to extract quiz data
+    quiz_data = parse_telegram_quiz_url(url)
+    
+    if not quiz_data:
+        # If direct parsing failed, ask user to enter quiz details manually
+        await update.message.reply_text(
+            "I couldn't automatically extract the quiz from that link.\n\n"
+            "Let's create it manually. Please send me the question text."
+        )
+        # Store URL for reference
+        context.user_data["manual_clone_url"] = url
+        return QUESTION
+    
+    # Store the parsed data
+    context.user_data["quiz_question"] = quiz_data["question"]
+    context.user_data["quiz_options"] = quiz_data["options"]
+    
+    # Create option buttons for selecting correct answer
+    keyboard = []
+    for i, option in enumerate(quiz_data["options"]):
+        keyboard.append([InlineKeyboardButton(f"{i+1}. {option}", callback_data=f"answer_{i}")])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    # Ask the user to select the correct answer
+    await update.message.reply_text(
+        f"I found the following quiz:\n\n"
+        f"Question: {quiz_data['question']}\n\n"
+        f"Options:\n" + "\n".join(f"{i+1}. {opt}" for i, opt in enumerate(quiz_data["options"])) + "\n\n"
+        f"Now select which option is the correct answer:",
+        reply_markup=reply_markup
+    )
+    
+    return ANSWER
 
 async def handle_quiz_url(update: Update, context: ContextTypes.DEFAULT_TYPE, url=None):
     """Handle processing a quiz URL"""
