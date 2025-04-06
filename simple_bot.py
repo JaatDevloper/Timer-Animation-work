@@ -417,41 +417,72 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 async def play(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handler for the /play command - starts a quiz"""
+    """Start a new quiz"""
     questions = load_questions()
     
     if not questions:
-        await update.message.reply_text(
-            "No quiz questions available. Use /add to create some!"
-        )
+        await update.message.reply_text("No questions available. Add some with /add command!")
         return
     
-    # Select a random question
-    question_data = random.choice(questions)
-    question = question_data["question"]
-    options = question_data["options"]
-    correct_option_id = question_data["answer"]
+    # Check if an ID was specified
+    if context.args and len(context.args) > 0:
+        try:
+            requested_id = int(context.args[0])
+            # Find all questions with this ID
+            matching_questions = [q for q in questions if q.get("id") == requested_id]
+            
+            if not matching_questions:
+                await update.message.reply_text(f"No questions found with ID {requested_id}.")
+                return
+                
+            # Tell the user how many questions we found
+            await update.message.reply_text(
+                f"📊 Starting a quiz with {len(matching_questions)} questions (ID: {requested_id}).\n"
+                "Questions will be sent one by one."
+            )
+            
+            # Send all matching questions as quizzes
+            for question in matching_questions:
+                await context.bot.send_poll(
+                    chat_id=update.effective_chat.id,
+                    question=question["question"],
+                    options=question["options"],
+                    type=Poll.QUIZ,
+                    correct_option_id=question["answer"],
+                    is_anonymous=False,
+                    explanation="Marathon mode quiz"
+                )
+                # Add a small delay between questions
+                await asyncio.sleep(1)
+                
+            return
+            
+        except ValueError:
+            await update.message.reply_text("Invalid ID format. Please use a number.")
+            return
     
-    # Store the correct answer in user_data for checking later
-    context.user_data["quiz_correct_answer"] = correct_option_id
-    context.user_data["quiz_question_id"] = question_data.get("id")
+    # If no ID specified or invalid ID, select a random question
+    question = random.choice(questions)
     
-    # Send the quiz as a poll
-    message = await context.bot.send_poll(
+    # Send the quiz poll
+    await context.bot.send_poll(
         chat_id=update.effective_chat.id,
-        question=question,
-        options=options,
+        question=question["question"],
+        options=question["options"],
         type=Poll.QUIZ,
-        correct_option_id=correct_option_id,
-        explanation=f"This question is from category: {question_data.get('category', 'General')}",
+        correct_option_id=question["answer"],
         is_anonymous=False
     )
     
-    # Store the poll message for reference
-    context.user_data["quiz_message_id"] = message.message_id
+    # Update stats for this user
+    user_id = update.effective_user.id
+    stats = load_stats()
     
-    # Log that a quiz was started
-    logger.info(f"Started quiz for user {update.effective_user.name}")
+    if str(user_id) not in stats:
+        stats[str(user_id)] = {"played": 0, "correct": 0}
+    
+    stats[str(user_id)]["played"] += 1
+    save_stats(stats)
 
 async def handle_poll_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler for when a user answers a poll"""
