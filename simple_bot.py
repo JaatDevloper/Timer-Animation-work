@@ -4,6 +4,7 @@ Simple Telegram Quiz Bot implementation
 import os
 import json
 import random
+import asyncio
 import logging
 import re
 import requests
