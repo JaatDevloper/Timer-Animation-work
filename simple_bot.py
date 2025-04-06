@@ -1154,6 +1154,348 @@ def main():
     # Start the Bot
     application.run_polling()
 
+# Constants for conversation states (if they're not already defined)
+EDIT_QUESTION, EDIT_OPTIONS, EDIT_ANSWER = range(5, 8)
+
+# Function to get the next available question ID
+def get_next_question_id():
+    questions = load_questions()
+    if not questions:
+        return 1
+    return max(q.get("id", 0) for q in questions) + 1
+
+# Function to get a question by ID
+def get_question_by_id(question_id):
+    questions = load_questions()
+    for question in questions:
+        if question.get("id") == question_id:
+            return question
+    return None
+
+# Handle forwarded polls conversion to quiz questions
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle messages sent to the bot"""
+    message = update.message
+    
+    # Check if the message is a forwarded poll
+    if message.forward_date and message.poll:
+        poll = message.poll
+        
+        # Extract poll information
+        question_text = poll.question
+        options = [option.text for option in poll.options]
+        
+        # Create keyboard to select the correct answer
+        keyboard = []
+        for i, option in enumerate(options):
+            keyboard.append([InlineKeyboardButton(
+                f"{i+1}. {option}", callback_data=f"polltoquiz_{i}"
+            )])
+        
+        # Store poll info in context.user_data
+        context.user_data["poll_to_quiz"] = {
+            "question": question_text,
+            "options": options
+        }
+        
+        # Ask user to select the correct answer
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await message.reply_text(
+            "📝 I received a poll! I'll convert it to a quiz question.\n\n"
+            f"Question: {question_text}\n\n"
+            "Please select the correct answer:",
+            reply_markup=reply_markup
+        )
+    else:
+        # Regular message handling
+        await message.reply_text(
+            "I can help you manage quiz questions. Try /help to see available commands, "
+            "or forward me a poll to convert it to a quiz question!"
+        )
+
+async def handle_poll_to_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle selection of correct answer for poll to quiz conversion"""
+    query = update.callback_query
+    await query.answer()
+    
+    if not query.data.startswith("polltoquiz_"):
+        return
+    
+    # Get the selected answer index
+    option_id = int(query.data.split("_")[1])
+    
+    # Get poll data from user_data
+    poll_data = context.user_data.get("poll_to_quiz")
+    if not poll_data:
+        await query.edit_message_text("Sorry, I couldn't find the poll data. Please try again.")
+        return
+    
+    # Create new question
+    question_id = get_next_question_id()
+    new_question = {
+        "id": question_id,
+        "question": poll_data["question"],
+        "options": poll_data["options"],
+        "answer": option_id,  # Using the selected option as correct answer
+        "category": "Converted Poll"
+    }
+    
+    # Add question to database
+    questions = load_questions()
+    questions.append(new_question)
+    save_questions(questions)
+    
+    # Create a preview of the quiz
+    preview = f"✅ Quiz added successfully!\n\nID: {question_id}\n"
+    preview += f"Question: {new_question['question']}\n\nOptions:\n"
+    
+    for i, option in enumerate(new_question['options']):
+        correct_mark = " ✓" if i == option_id else ""
+        preview += f"{i+1}. {option}{correct_mark}\n"
+    
+    # Provide edit options
+    keyboard = [
+        [InlineKeyboardButton("Edit Question", callback_data=f"edit_question_{question_id}")],
+        [InlineKeyboardButton("Edit Options", callback_data=f"edit_options_{question_id}")],
+        [InlineKeyboardButton("Change Answer", callback_data=f"edit_answer_{question_id}")],
+        [InlineKeyboardButton("Test this Quiz", callback_data=f"test_quiz_{question_id}")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    # Clean up user_data
+    context.user_data.pop("poll_to_quiz", None)
+    
+    await query.edit_message_text(preview, reply_markup=reply_markup)
+
+async def handle_edit_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle edit selections for converted polls"""
+    query = update.callback_query
+    await query.answer()
+    
+    parts = query.data.split("_")
+    if len(parts) < 3:
+        return
+    
+    action = parts[1]
+    try:
+        question_id = int(parts[2])
+    except ValueError:
+        await query.edit_message_text("Invalid question ID.")
+        return
+    
+    question = get_question_by_id(question_id)
+    if not question:
+        await query.edit_message_text("Question not found.")
+        return
+    
+    if action == "question":
+        # Edit question text
+        context.user_data["editing"] = {
+            "question_id": question_id,
+            "action": "question"
+        }
+        await query.edit_message_text(
+            f"Current question: {question['question']}\n\n"
+            "Please send me the new question text:"
+        )
+        return EDIT_QUESTION
+    
+    elif action == "options":
+        # Edit options
+        context.user_data["editing"] = {
+            "question_id": question_id,
+            "action": "options"
+        }
+        options_text = "\n".join(question["options"])
+        await query.edit_message_text(
+            f"Current options:\n{options_text}\n\n"
+            "Please send me the new options, one per line:"
+        )
+        return EDIT_OPTIONS
+    
+    elif action == "answer":
+        # Change correct answer
+        context.user_data["editing"] = {
+            "question_id": question_id,
+            "action": "answer"
+        }
+        
+        # Create keyboard with options
+        keyboard = []
+        for i, option in enumerate(question["options"]):
+            correct_mark = " ✓" if i == question["answer"] else ""
+            keyboard.append([InlineKeyboardButton(
+                f"{i+1}. {option}{correct_mark}", 
+                callback_data=f"editanswer_{question_id}_{i}"
+            )])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            f"Question: {question['question']}\n\n"
+            "Select the correct answer:",
+            reply_markup=reply_markup
+        )
+        return EDIT_ANSWER
+    
+    elif action == "test":
+        # Test the quiz
+        question_text = question["question"]
+        options = question["options"]
+        correct_option = question["answer"]
+        
+        # Send as quiz poll
+        await context.bot.send_poll(
+            chat_id=update.effective_chat.id,
+            question=question_text,
+            options=options,
+            type=Poll.QUIZ,
+            correct_option_id=correct_option,
+            explanation="Test quiz from your converted poll"
+        )
+        
+        await query.edit_message_text(
+            f"I've sent the quiz for testing. If you need to make more changes, use /edit {question_id}"
+        )
+
+async def handle_edit_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle editing the question text"""
+    new_text = update.message.text
+    editing_data = context.user_data.get("editing")
+    
+    if not editing_data:
+        await update.message.reply_text("Error: No editing session in progress. Please try again.")
+        return ConversationHandler.END
+    
+    question_id = editing_data.get("question_id")
+    question = get_question_by_id(question_id)
+    
+    if not question:
+        await update.message.reply_text("Error: Question not found.")
+        return ConversationHandler.END
+    
+    # Update the question text
+    questions = load_questions()
+    for q in questions:
+        if q.get("id") == question_id:
+            q["question"] = new_text
+            break
+    
+    save_questions(questions)
+    
+    # Clear editing data
+    context.user_data.pop("editing", None)
+    
+    await update.message.reply_text(
+        f"✅ Question updated successfully!\n\n"
+        f"New question: {new_text}\n\n"
+        f"Use /play to test it or /edit {question_id} to make more changes."
+    )
+    
+    return ConversationHandler.END
+
+async def handle_edit_options(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle editing the question options"""
+    new_options_text = update.message.text
+    new_options = [opt.strip() for opt in new_options_text.split('\n') if opt.strip()]
+    
+    if len(new_options) < 2:
+        await update.message.reply_text(
+            "You need to provide at least 2 options. Please try again, with one option per line."
+        )
+        return EDIT_OPTIONS
+    
+    editing_data = context.user_data.get("editing")
+    
+    if not editing_data:
+        await update.message.reply_text("Error: No editing session in progress. Please try again.")
+        return ConversationHandler.END
+    
+    question_id = editing_data.get("question_id")
+    question = get_question_by_id(question_id)
+    
+    if not question:
+        await update.message.reply_text("Error: Question not found.")
+        return ConversationHandler.END
+    
+    # Update the options
+    old_answer = question["answer"]
+    questions = load_questions()
+    
+    for q in questions:
+        if q.get("id") == question_id:
+            q["options"] = new_options
+            # Ensure the answer is still valid
+            if old_answer >= len(new_options):
+                q["answer"] = 0  # Default to first option if old answer is invalid
+            break
+    
+    save_questions(questions)
+    
+    # Clear editing data
+    context.user_data.pop("editing", None)
+    
+    # Show updated options with answer marked
+    updated_question = get_question_by_id(question_id)
+    options_display = ""
+    for i, option in enumerate(updated_question["options"]):
+        correct_mark = " ✓" if i == updated_question["answer"] else ""
+        options_display += f"{i+1}. {option}{correct_mark}\n"
+    
+    await update.message.reply_text(
+        f"✅ Options updated successfully!\n\n"
+        f"Question: {updated_question['question']}\n\n"
+        f"New options:\n{options_display}\n"
+        f"Use /play to test it or /edit {question_id} to make more changes."
+    )
+    
+    return ConversationHandler.END
+
+async def handle_edit_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle changing the correct answer"""
+    query = update.callback_query
+    await query.answer()
+    
+    # Format: editanswer_questionid_optionid
+    parts = query.data.split('_')
+    if len(parts) < 3:
+        await query.edit_message_text("Invalid selection. Please try again.")
+        return ConversationHandler.END
+    
+    try:
+        question_id = int(parts[1])
+        new_answer = int(parts[2])
+    except ValueError:
+        await query.edit_message_text("Invalid selection format. Please try again.")
+        return ConversationHandler.END
+    
+    # Update the correct answer
+    questions = load_questions()
+    for q in questions:
+        if q.get("id") == question_id:
+            q["answer"] = new_answer
+            break
+    
+    save_questions(questions)
+    
+    # Clear editing data
+    context.user_data.pop("editing", None)
+    
+    # Show updated question with new answer marked
+    updated_question = get_question_by_id(question_id)
+    options_display = ""
+    for i, option in enumerate(updated_question["options"]):
+        correct_mark = " ✓" if i == new_answer else ""
+        options_display += f"{i+1}. {option}{correct_mark}\n"
+    
+    await query.edit_message_text(
+        f"✅ Correct answer updated!\n\n"
+        f"Question: {updated_question['question']}\n\n"
+        f"Options:\n{options_display}\n"
+        f"Use /play to test it or /edit {question_id} to make more changes."
+    )
+    
+    return ConversationHandler.END
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle messages sent to the bot"""
     message = update.message
