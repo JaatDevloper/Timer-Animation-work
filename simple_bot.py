@@ -106,12 +106,92 @@ def delete_question_by_id(question_id):
 def parse_telegram_quiz_url(url):
     """Parse a Telegram quiz URL to extract question and options"""
     try:
-        # Extract question and options from URL parameters
+        # Check if URL is valid
         parsed_url = urlparse(url)
         if not parsed_url.netloc or "t.me" not in parsed_url.netloc:
+            logger.error(f"Not a valid Telegram URL: {url}")
             return None
         
-        # Try to fetch the webpage content for extracting quiz details
+        # For channel message links like t.me/rajsthangk27/4702
+        channel_pattern = r't\.me/([^/]+)/(\d+)'
+        channel_match = re.search(channel_pattern, url)
+        
+        if channel_match:
+            # This is a channel message link
+            channel_name = channel_match.group(1)
+            message_id = channel_match.group(2)
+            logger.info(f"Detected channel link for {channel_name}, message {message_id}")
+            
+            # Special handling for RAJ GK QUIZ HOUSE and similar channels
+            if "raj" in channel_name.lower() and "quiz" in url.lower():
+                # Try to get the actual quiz content using Telegram API if available
+                if hasattr(pyrogram, 'Client') and API_ID and API_HASH and TOKEN:
+                    try:
+                        # Use Pyrogram to fetch the actual message
+                        logger.info("Attempting to fetch quiz using Pyrogram...")
+                        async def fetch_message():
+                            async with pyrogram.Client("quiz_bot", api_id=API_ID, api_hash=API_HASH, bot_token=TOKEN) as app:
+                                # Try to get the message
+                                message = await app.get_messages(channel_name, int(message_id))
+                                if message and message.poll:
+                                    # Extract question and options
+                                    question = message.poll.question
+                                    options = [opt.text for opt in message.poll.options]
+                                    return {"question": question, "options": options}
+                                else:
+                                    logger.error("Message doesn't contain a poll")
+                                    return None
+                        
+                        # Run the async function
+                        import asyncio
+                        result = asyncio.run(fetch_message())
+                        if result:
+                            logger.info(f"Successfully extracted quiz via Pyrogram: {result['question']}")
+                            return result
+                    except Exception as e:
+                        logger.error(f"Error using Pyrogram to fetch message: {e}")
+            
+            # Fall back to web scraping as before
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            }
+            response = requests.get(url, headers=headers)
+            if response.status_code != 200:
+                logger.error(f"Failed to fetch {url}, status code: {response.status_code}")
+                return None
+            
+            content = response.text
+            
+            # Try to extract title which might contain quiz info for RAJ GK QUIZ HOUSE
+            raj_quiz_pattern = r'RAJ GK QUIZ HOUSE.*?Quiz.*?[\'"]([^\'"]+)[\'"]'
+            raj_quiz_match = re.search(raj_quiz_pattern, content, re.IGNORECASE | re.DOTALL)
+            
+            if raj_quiz_match:
+                quiz_title = raj_quiz_match.group(1).strip()
+                logger.info(f"Found quiz title: {quiz_title}")
+                
+                # For these specific quizzes, we need to manually extract options
+                # from the VIEW MESSAGE link
+                view_message_link = f"https://t.me/{channel_name}/{message_id}?embed=1&mode=tme"
+                logger.info(f"Fetching embedded view: {view_message_link}")
+                
+                embed_response = requests.get(view_message_link, headers=headers)
+                if embed_response.status_code == 200:
+                    embed_content = embed_response.text
+                    
+                    # Try to find options in the embedded view
+                    option_pattern = r'<div class="tgme_widget_message_poll_option_text">([^<]+)</div>'
+                    option_matches = re.findall(option_pattern, embed_content)
+                    
+                    if option_matches and len(option_matches) >= 2:
+                        logger.info(f"Found {len(option_matches)} options in embedded view")
+                        return {
+                            "question": quiz_title,
+                            "options": option_matches,
+                            "answer": 0  # Default to first option
+                        }
+        
+        # Try standard parsing method if specific channel handling didn't work
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
         }
@@ -121,98 +201,68 @@ def parse_telegram_quiz_url(url):
             
         content = response.text
         
-        # Extract quiz title using meta tags or OpenGraph data
-        title_match = re.search(r'<meta property="og:title" content="([^"]+)"', content)
-        title_match2 = re.search(r'<meta property="twitter:title" content="([^"]+)"', content)
-        description_match = re.search(r'<meta property="og:description" content="([^"]+)"', content)
-        
-        # Extract quiz details from the page
-        quiz_title = None
-        quiz_description = None
-        
-        if title_match:
-            quiz_title = title_match.group(1).strip()
-        elif title_match2:
-            quiz_title = title_match2.group(1).strip()
-            
-        if description_match:
-            quiz_description = description_match.group(1).strip()
-        
-        # Try to extract quiz information from page content
-        # Look for the text that might contain the question
-        question = None
-        if quiz_title and "Quiz" in quiz_title:
-            # Try to extract the actual question from the description
-            if quiz_description:
-                question = quiz_description
-            else:
-                question = quiz_title
-        elif quiz_description:
-            question = quiz_description
-        
-        # If we still don't have a question, look for it in the page content
-        if not question:
-            # Try to find question in HTML content
-            question_container = re.search(r'<div class="tgme_widget_message_text[^>]*>(.*?)</div>', content, re.DOTALL)
-            if question_container:
-                # Clean up HTML tags to get plain text
-                from bs4 import BeautifulSoup
-                soup = BeautifulSoup(question_container.group(1), 'html.parser')
-                question = soup.get_text().strip()
-        
-        # Extract options from the page content
-        options = []
+        # Look for poll options in the page content
         options_matches = re.findall(r'<div class="tgme_widget_message_poll_option_text">([^<]+)</div>', content)
-        if options_matches:
-            options = [opt.strip() for opt in options_matches]
         
-        # If we couldn't find options through typical methods, try a more general approach
-        if not options:
-            # Look for any structured data that might contain options
-            option_containers = re.findall(r'<div class="[^"]*option[^"]*"[^>]*>(.*?)</div>', content, re.DOTALL)
-            if option_containers:
+        # If we find poll options, look for the question
+        if options_matches and len(options_matches) >= 2:
+            # Try to find the question
+            question_match = re.search(r'<div class="tgme_widget_message_poll_question">([^<]+)</div>', content)
+            if question_match:
+                question = question_match.group(1).strip()
+                logger.info(f"Found poll question: {question}")
+                
+                return {
+                    "question": question,
+                    "options": options_matches,
+                    "answer": 0  # Default to first option
+                }
+        
+        # If we still don't have options, try to find message text
+        if not options_matches:
+            message_text_match = re.search(r'<div class="tgme_widget_message_text[^"]*">(.*?)</div>', content, re.DOTALL)
+            if message_text_match:
+                message_text = message_text_match.group(1).strip()
+                
+                # Clean up HTML tags
                 from bs4 import BeautifulSoup
-                for container in option_containers:
-                    soup = BeautifulSoup(container, 'html.parser')
-                    option_text = soup.get_text().strip()
-                    if option_text and len(option_text) < 100:  # Reasonable length for an option
-                        options.append(option_text)
-        
-        # Some quizzes might have the question and options embedded in a script tag
-        if not question or not options:
-            script_data = re.search(r'<script[^>]*>.*?({.*?})</script>', content, re.DOTALL)
-            if script_data:
-                try:
-                    import json
-                    # Try to extract JSON data
-                    json_str = script_data.group(1)
-                    # Find valid JSON object within the script
-                    json_match = re.search(r'{.*}', json_str)
-                    if json_match:
-                        json_data = json.loads(json_match.group(0))
-                        # Look for quiz data in JSON
-                        if 'question' in json_data:
-                            question = json_data['question']
-                        if 'options' in json_data and isinstance(json_data['options'], list):
-                            options = json_data['options']
-                except Exception as e:
-                    logger.debug(f"Failed to parse JSON from script tag: {e}")
-        
-        # If we found a question and at least 2 options, create and return the quiz data
-        if question and options and len(options) >= 2:
-            logger.info(f"Successfully extracted quiz: {question} with {len(options)} options")
-            return {
-                "question": question,
-                "options": options,
-                "answer": 0  # Default to first option, user needs to set the correct answer
-            }
-        else:
-            logger.error(f"Failed to extract complete quiz data. Question: {question}, Options count: {len(options) if options else 0}")
+                soup = BeautifulSoup(message_text, 'html.parser')
+                clean_text = soup.get_text()
+                
+                # Try to parse quiz format: Question followed by options with numbers or letters
+                lines = [line.strip() for line in clean_text.split('\n') if line.strip()]
+                
+                if lines and len(lines) >= 3:  # At least a question and 2 options
+                    question = lines[0]
+                    options = lines[1:]
+                    
+                    # Clean up option format (remove a), b), 1., 2., etc.)
+                    cleaned_options = []
+                    for opt in options:
+                        # Remove common option prefixes
+                        opt = re.sub(r'^[a-z]\)\s*', '', opt)
+                        opt = re.sub(r'^[a-z]\.\s*', '', opt)
+                        opt = re.sub(r'^\d+\)\s*', '', opt)
+                        opt = re.sub(r'^\d+\.\s*', '', opt)
+                        opt = re.sub(r'^[•*-]\s*', '', opt)
+                        cleaned_options.append(opt)
+                    
+                    if len(cleaned_options) >= 2:
+                        logger.info(f"Extracted question and {len(cleaned_options)} options from message text")
+                        return {
+                            "question": question,
+                            "options": cleaned_options,
+                            "answer": 0  # Default to first option
+                        }
+            
+        logger.error("Failed to extract quiz content from the link")
+        return None
             
     except Exception as e:
         logger.error(f"Error parsing Telegram quiz URL: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
     
-    logger.warning(f"Could not parse quiz from URL: {url}")
     return None
 
 def load_users():
