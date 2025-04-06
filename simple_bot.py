@@ -1809,19 +1809,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Parse the ID
         try:
             question_id = int(id_input)
-            existing = get_question_by_id(question_id)
-            if existing:
-                await message.reply_text(
-                    f"Error: ID {question_id} already exists. Please choose another ID."
-                )
-                return
         except ValueError:
             await message.reply_text(
                 "Invalid ID format. Please send a number."
             )
             return
         
-        # Save question with chosen ID
+        # Save question with chosen ID - even if ID already exists
         new_question = {
             "id": question_id,
             "question": poll_data["question"],
@@ -1834,8 +1828,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         questions.append(new_question)
         save_questions(questions)
         
+        # Count how many questions have this ID
+        same_id_count = sum(1 for q in questions if q.get("id") == question_id)
+        
         # Preview
-        preview = f"✅ Quiz added with ID: {question_id}\n\n"
+        preview = f"✅ Quiz added with ID: {question_id}\n"
+        if same_id_count > 1:
+            preview += f"(You now have {same_id_count} questions with this ID)\n\n"
+        else:
+            preview += "\n"
         preview += f"Question: {new_question['question']}\n\nOptions:\n"
         
         for i, option in enumerate(new_question['options']):
@@ -1844,10 +1845,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Keyboard
         keyboard = [
-            [InlineKeyboardButton("Edit Question", callback_data=f"edit_question_{question_id}")],
-            [InlineKeyboardButton("Edit Options", callback_data=f"edit_options_{question_id}")],
-            [InlineKeyboardButton("Change Answer", callback_data=f"edit_answer_{question_id}")],
-            [InlineKeyboardButton("Test this Quiz", callback_data=f"test_quiz_{question_id}")]
+            [InlineKeyboardButton("Edit Question", callback_data=f"edit_question_{len(questions)-1}")],
+            [InlineKeyboardButton("Edit Options", callback_data=f"edit_options_{len(questions)-1}")],
+            [InlineKeyboardButton("Change Answer", callback_data=f"edit_answer_{len(questions)-1}")],
+            [InlineKeyboardButton("Test this Quiz", callback_data=f"test_quiz_{len(questions)-1}")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
