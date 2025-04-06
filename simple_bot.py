@@ -1141,7 +1141,7 @@ def main():
     # Handle poll to quiz conversion
     application.add_handler(CallbackQueryHandler(handle_poll_to_quiz, pattern=r"^polltoquiz_"))
     application.add_handler(CallbackQueryHandler(lambda u, c: None, pattern=r"^test_quiz_"))  # Placeholder for test_quiz handler
-    
+    application.add_handler(CallbackQueryHandler(handle_poll_id_selection, pattern=r"^pollid_"))
     # Add handler for general message handling (including forwarded polls)
     application.add_handler(MessageHandler(
         filters.FORWARDED & filters.POLL | filters.TEXT & ~filters.COMMAND, 
