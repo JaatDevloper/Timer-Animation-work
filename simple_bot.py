@@ -1555,28 +1555,29 @@ async def handle_poll_to_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not query.data.startswith("polltoquiz_"):
         return
     
-    # Get the selected answer index
     option_id = int(query.data.split("_")[1])
-    
-    # Get poll data from user_data
     poll_data = context.user_data.get("poll_to_quiz")
+    
     if not poll_data:
         await query.edit_message_text("Sorry, I couldn't find the poll data. Please try again.")
         return
     
-    # Store the selected answer in user_data
+    # Store answer
     poll_data["selected_answer"] = option_id
     
-    # Ask user to provide a specific ID for this question
+    # Create buttons for ID choice
+    next_id = get_next_question_id()
+    keyboard = [
+        [InlineKeyboardButton(f"Auto ID ({next_id})", callback_data=f"pollid_auto")],
+        [InlineKeyboardButton("Custom ID", callback_data="pollid_custom")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    # Ask for ID choice
     await query.edit_message_text(
-        "Please send the ID number you want to use for this question.\n\n"
-        "Send a number (e.g., 42) or type 'auto' to automatically assign the next available ID."
+        "How would you like to assign an ID to this question?",
+        reply_markup=reply_markup
     )
-    
-    # Set the state in user_data
-    context.user_data["awaiting_poll_id"] = True
-    
-    # Note: We'll handle the ID input in the handle_message function
 
 async def handle_poll_to_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle selection of correct answer for poll to quiz conversion"""
