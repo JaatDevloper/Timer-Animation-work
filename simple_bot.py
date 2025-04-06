@@ -1473,45 +1473,36 @@ async def handle_edit_answer(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     return ConversationHandler.END
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle messages sent to the bot"""
-    message = update.message
+async def handle_poll_to_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle selection of correct answer for poll to quiz conversion"""
+    query = update.callback_query
+    await query.answer()
     
-    # Check if the message is a forwarded poll
-    if message.forward_date and message.poll:
-        poll = message.poll
-        
-        # Extract poll information
-        question_text = poll.question
-        options = [option.text for option in poll.options]
-        
-        # Create keyboard to select the correct answer
-        keyboard = []
-        for i, option in enumerate(options):
-            keyboard.append([InlineKeyboardButton(
-                f"{i+1}. {option}", callback_data=f"polltoquiz_{i}"
-            )])
-        
-        # Store poll info in context.user_data
-        context.user_data["poll_to_quiz"] = {
-            "question": question_text,
-            "options": options
-        }
-        
-        # Ask user to select the correct answer
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await message.reply_text(
-            "📝 I received a poll! I'll convert it to a quiz question.\n\n"
-            f"Question: {question_text}\n\n"
-            "Please select the correct answer:",
-            reply_markup=reply_markup
-        )
-    else:
-        # Regular message handling
-        await message.reply_text(
-            "I can help you manage quiz questions. Try /help to see available commands, "
-            "or forward me a poll to convert it to a quiz question!"
-        )
+    if not query.data.startswith("polltoquiz_"):
+        return
+    
+    # Get the selected answer index
+    option_id = int(query.data.split("_")[1])
+    
+    # Get poll data from user_data
+    poll_data = context.user_data.get("poll_to_quiz")
+    if not poll_data:
+        await query.edit_message_text("Sorry, I couldn't find the poll data. Please try again.")
+        return
+    
+    # Store the selected answer in user_data
+    poll_data["selected_answer"] = option_id
+    
+    # Ask user to provide a specific ID for this question
+    await query.edit_message_text(
+        "Please send the ID number you want to use for this question.\n\n"
+        "Send a number (e.g., 42) or type 'auto' to automatically assign the next available ID."
+    )
+    
+    # Set the state in user_data
+    context.user_data["awaiting_poll_id"] = True
+    
+    # Note: We'll handle the ID input in the handle_message function
 
 async def handle_poll_to_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle selection of correct answer for poll to quiz conversion"""
