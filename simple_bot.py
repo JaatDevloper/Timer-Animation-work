@@ -1173,9 +1173,84 @@ def get_question_by_id(question_id):
     return None
 
 # Handle forwarded polls conversion to quiz questions
+# First function - when a poll is forwarded
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle messages sent to the bot"""
     message = update.message
+    
+    # Check if we're waiting for a poll ID (this happens after selecting the correct answer)
+    if context.user_data.get("awaiting_poll_id", False):
+        # Process the ID input
+        id_input = message.text.strip()
+        
+        # Get poll data
+        poll_data = context.user_data.get("poll_to_quiz")
+        if not poll_data:
+            await message.reply_text("Error: Poll data not found. Please try again.")
+            context.user_data.pop("awaiting_poll_id", None)
+            return
+        
+        # Check if user wants auto ID
+        if id_input.lower() == "auto":
+            question_id = get_next_question_id()
+        else:
+            # Try to parse the ID as an integer
+            try:
+                question_id = int(id_input)
+                
+                # Check if this ID already exists
+                existing_question = get_question_by_id(question_id)
+                if existing_question:
+                    await message.reply_text(
+                        f"A question with ID {question_id} already exists. Please choose a different ID or type 'auto'."
+                    )
+                    return
+                    
+            except ValueError:
+                await message.reply_text(
+                    "Invalid ID format. Please send a number (e.g., 42) or type 'auto'."
+                )
+                return
+        
+        # Create new question with the specified ID
+        new_question = {
+            "id": question_id,
+            "question": poll_data["question"],
+            "options": poll_data["options"],
+            "answer": poll_data["selected_answer"],
+            "category": "Converted Poll"
+        }
+        
+        # Add question to database
+        questions = load_questions()
+        questions.append(new_question)
+        save_questions(questions)
+        
+        # Create a preview of the quiz
+        preview = f"✅ Quiz added successfully!\n\nID: {question_id}\n"
+        preview += f"Question: {new_question['question']}\n\nOptions:\n"
+        
+        for i, option in enumerate(new_question['options']):
+            correct_mark = " ✓" if i == poll_data["selected_answer"] else ""
+            preview += f"{i+1}. {option}{correct_mark}\n"
+        
+        # Provide edit options
+        keyboard = [
+            [InlineKeyboardButton("Edit Question", callback_data=f"edit_question_{question_id}")],
+            [InlineKeyboardButton("Edit Options", callback_data=f"edit_options_{question_id}")],
+            [InlineKeyboardButton("Change Answer", callback_data=f"edit_answer_{question_id}")],
+            [InlineKeyboardButton("Test this Quiz", callback_data=f"test_quiz_{question_id}")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        # Send the preview
+        await message.reply_text(preview, reply_markup=reply_markup)
+        
+        # Clean up user_data
+        context.user_data.pop("poll_to_quiz", None)
+        context.user_data.pop("awaiting_poll_id", None)
+        
+        return
     
     # Check if the message is a forwarded poll
     if message.forward_date and message.poll:
@@ -1213,6 +1288,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "or forward me a poll to convert it to a quiz question!"
         )
 
+# Second function - handles when user selects the correct answer
 async def handle_poll_to_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle selection of correct answer for poll to quiz conversion"""
     query = update.callback_query
@@ -1239,10 +1315,8 @@ async def handle_poll_to_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE
         "Send a number (e.g., 42) or type 'auto' to automatically assign the next available ID."
     )
     
-    # Set the state in user_data
+    # Set the state in user_data to indicate we're waiting for an ID
     context.user_data["awaiting_poll_id"] = True
-    
-    # Note: We'll handle the ID input in the handle_message function
 
 async def handle_edit_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle edit selections for converted polls"""
