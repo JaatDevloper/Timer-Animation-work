@@ -1723,5 +1723,71 @@ async def handle_edit_selection(update: Update, context: ContextTypes.DEFAULT_TY
             f"I've sent the quiz for testing. If you need to make more changes, use /edit {question_id}"
         )
 
+async def handle_poll_id_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle selection of ID method for poll conversion"""
+    query = update.callback_query
+    await query.answer()
+    
+    if not query.data.startswith("pollid_"):
+        return
+    
+    choice = query.data.split("_")[1]
+    poll_data = context.user_data.get("poll_to_quiz")
+    
+    if not poll_data:
+        await query.edit_message_text("Sorry, I couldn't find the poll data. Please try again.")
+        return
+    
+    if choice == "auto":
+        # Use auto ID
+        question_id = get_next_question_id()
+        
+        # Create new question
+        new_question = {
+            "id": question_id,
+            "question": poll_data["question"],
+            "options": poll_data["options"],
+            "answer": poll_data["selected_answer"],
+            "category": "Converted Poll"
+        }
+        
+        # Add question to database
+        questions = load_questions()
+        questions.append(new_question)
+        save_questions(questions)
+        
+        # Create a preview of the quiz
+        preview = f"✅ Quiz added successfully!\n\nID: {question_id}\n"
+        preview += f"Question: {new_question['question']}\n\nOptions:\n"
+        
+        for i, option in enumerate(new_question['options']):
+            correct_mark = " ✓" if i == poll_data["selected_answer"] else ""
+            preview += f"{i+1}. {option}{correct_mark}\n"
+        
+        # Provide edit options
+        keyboard = [
+            [InlineKeyboardButton("Edit Question", callback_data=f"edit_question_{question_id}")],
+            [InlineKeyboardButton("Edit Options", callback_data=f"edit_options_{question_id}")],
+            [InlineKeyboardButton("Change Answer", callback_data=f"edit_answer_{question_id}")],
+            [InlineKeyboardButton("Test this Quiz", callback_data=f"test_quiz_{question_id}")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        # Send the preview
+        await query.edit_message_text(preview, reply_markup=reply_markup)
+        
+        # Clean up user_data
+        context.user_data.pop("poll_to_quiz", None)
+        
+    elif choice == "custom":
+        # Ask for custom ID
+        await query.edit_message_text(
+            "Please enter the ID number you want to use for this question.\n\n"
+            "Send a number (e.g., 42)."
+        )
+        
+        # Set flag to wait for ID
+        context.user_data["awaiting_poll_id"] = True
+
 
 
