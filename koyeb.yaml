@@ -1,0 +1,54 @@
+name: telegram-quiz-bot
+
+service:
+  name: telegram-quiz-bot
+  type: web
+  
+  # Source configuration
+  ports:
+    - port: 5000
+      http:
+        # Health check configuration
+        health:
+          path: /health
+          period: 10s
+          initial-delay: 30s
+          fail-threshold: 3
+          success-threshold: 1
+          timeout: 5s
+  
+  # Build configuration
+  build:
+    builder: dockerfile
+    context: /
+    dockerfile: Dockerfile
+  
+  # Environment variables
+  env:
+    - name: PORT
+      value: 5000
+    - name: HOST
+      value: 0.0.0.0
+    - name: DEBUG
+      value: False
+    - name: TELEGRAM_BOT_TOKEN
+      secret: TELEGRAM_BOT_TOKEN
+  
+  # Resource allocation
+  resources:
+    cpu: 0.25
+    memory: 512M
+    
+  # Scale configuration
+  scaling:
+    min: 1
+    max: 1
+    
+  # Define regions
+  regions:
+    - fra  # Frankfurt (Europe)
+
+  # Enable automatic deployments
+  routes:
+    - path: /
+      public: true
