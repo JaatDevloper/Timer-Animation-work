@@ -439,11 +439,12 @@ async def play(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Tell the user how many questions we found
             await update.message.reply_text(
                 f"📊 Starting a quiz with {len(matching_questions)} questions (ID: {requested_id}).\n"
-                "Questions will be sent one by one."
+                "Questions will be sent every 15 seconds."
             )
             
-            # Send all matching questions as quizzes
-            for question in matching_questions:
+            # Send the first question
+            if matching_questions:
+                question = matching_questions[0]
                 await context.bot.send_poll(
                     chat_id=update.effective_chat.id,
                     question=question["question"],
@@ -453,9 +454,16 @@ async def play(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     is_anonymous=False,
                     explanation="Marathon mode quiz"
                 )
-                # Add a small delay between questions
-                await asyncio.sleep(1)
+            
+            # Store the remaining questions in user_data for the timer
+            if len(matching_questions) > 1:
+                context.user_data["marathon_questions"] = matching_questions[1:]
+                context.user_data["marathon_question_index"] = 0
+                context.user_data["marathon_chat_id"] = update.effective_chat.id
                 
+                # Schedule the first question after 15 seconds
+                await schedule_next_question(context)
+            
             return
             
         except ValueError:
@@ -484,6 +492,38 @@ async def play(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     stats[str(user_id)]["played"] += 1
     save_stats(stats)
+
+async def schedule_next_question(context: ContextTypes.DEFAULT_TYPE):
+    """Schedule the next question in the marathon mode after a delay"""
+    # Wait for 15 seconds
+    await asyncio.sleep(15)
+    
+    # Check if we have remaining questions
+    marathon_questions = context.user_data.get("marathon_questions", [])
+    if not marathon_questions:
+        return
+    
+    # Get the next question
+    question = marathon_questions[0]
+    chat_id = context.user_data.get("marathon_chat_id")
+    
+    # Send the question
+    await context.bot.send_poll(
+        chat_id=chat_id,
+        question=question["question"],
+        options=question["options"],
+        type=Poll.QUIZ,
+        correct_option_id=question["answer"],
+        is_anonymous=False,
+        explanation="Marathon mode quiz"
+    )
+    
+    # Update the remaining questions
+    context.user_data["marathon_questions"] = marathon_questions[1:]
+    
+    # Schedule the next question if we have more
+    if context.user_data["marathon_questions"]:
+        await schedule_next_question(context)
 
 async def handle_poll_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler for when a user answers a poll"""
