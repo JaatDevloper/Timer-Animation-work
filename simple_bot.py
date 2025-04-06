@@ -1126,23 +1126,28 @@ def main():
     )
     application.add_handler(clone_quiz_conv)
     
-    # Add conversation handler for poll-to-quiz conversion editing
-    edit_poll_quiz_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(handle_edit_selection, pattern=r"^edit_")],
+    # Add conversation handler for quiz editing
+    edit_quiz_conv = ConversationHandler(
+        entry_points=[CommandHandler("edit", edit_quiz)],
         states={
-            EDIT_QUESTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_edit_text)],
-            EDIT_OPTIONS: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_edit_options)],
-            EDIT_ANSWER: [CallbackQueryHandler(handle_edit_answer, pattern=r"^editanswer_")]
+            EDIT_SELECT: [CallbackQueryHandler(lambda u, c: None, pattern=r"^edit_")],
+            EDIT_QUESTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, lambda update, context: None)],
+            EDIT_OPTIONS: [MessageHandler(filters.TEXT & ~filters.COMMAND, lambda update, context: None)],
+            EDIT_ANSWER: [CallbackQueryHandler(lambda u, c: None, pattern=r"^editanswer_")]
         },
         fallbacks=[CommandHandler("cancel", cancel)]
     )
-    application.add_handler(edit_poll_quiz_conv)
+    application.add_handler(edit_quiz_conv)
     
-    # Handle poll to quiz conversion
+    # Add handlers for poll-to-quiz conversion
     application.add_handler(CallbackQueryHandler(handle_poll_to_quiz, pattern=r"^polltoquiz_"))
-    application.add_handler(CallbackQueryHandler(lambda u, c: None, pattern=r"^test_quiz_"))  # Placeholder for test_quiz handler
     application.add_handler(CallbackQueryHandler(handle_poll_id_selection, pattern=r"^pollid_"))
+    
+    # Add handler for saving forwarded quizzes (if you have this feature)
+    application.add_handler(CommandHandler("saveforward", save_forward))
+    
     # Add handler for general message handling (including forwarded polls)
+    # This must come after all other handlers that might process text messages
     application.add_handler(MessageHandler(
         filters.FORWARDED & filters.POLL | filters.TEXT & ~filters.COMMAND, 
         handle_message
@@ -1153,11 +1158,8 @@ def main():
     
     # Start the Bot
     application.run_polling()
-
-# Constants for conversation states (if they're not already defined)
-EDIT_QUESTION, EDIT_OPTIONS, EDIT_ANSWER = range(5, 8)
-
 # Function to get the next available question ID
+
 def get_next_question_id():
     questions = load_questions()
     if not questions:
@@ -1788,6 +1790,210 @@ async def handle_poll_id_selection(update: Update, context: ContextTypes.DEFAULT
         
         # Set flag to wait for ID
         context.user_data["awaiting_poll_id"] = True
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle messages sent to the bot"""
+    message = update.message
+    
+    # Check if we're waiting for a poll ID
+    if context.user_data.get("awaiting_poll_id", False):
+        # Process ID input
+        id_input = message.text.strip()
+        poll_data = context.user_data.get("poll_to_quiz")
+        
+        if not poll_data:
+            await message.reply_text("Error: Poll data not found. Please try again.")
+            context.user_data.pop("awaiting_poll_id", None)
+            return
+        
+        # Parse the ID
+        try:
+            question_id = int(id_input)
+            existing = get_question_by_id(question_id)
+            if existing:
+                await message.reply_text(
+                    f"Error: ID {question_id} already exists. Please choose another ID."
+                )
+                return
+        except ValueError:
+            await message.reply_text(
+                "Invalid ID format. Please send a number."
+            )
+            return
+        
+        # Save question with chosen ID
+        new_question = {
+            "id": question_id,
+            "question": poll_data["question"],
+            "options": poll_data["options"],
+            "answer": poll_data["selected_answer"],
+            "category": "Converted Poll"
+        }
+        
+        questions = load_questions()
+        questions.append(new_question)
+        save_questions(questions)
+        
+        # Preview
+        preview = f"✅ Quiz added with ID: {question_id}\n\n"
+        preview += f"Question: {new_question['question']}\n\nOptions:\n"
+        
+        for i, option in enumerate(new_question['options']):
+            correct_mark = " ✓" if i == poll_data["selected_answer"] else ""
+            preview += f"{i+1}. {option}{correct_mark}\n"
+        
+        # Keyboard
+        keyboard = [
+            [InlineKeyboardButton("Edit Question", callback_data=f"edit_question_{question_id}")],
+            [InlineKeyboardButton("Edit Options", callback_data=f"edit_options_{question_id}")],
+            [InlineKeyboardButton("Change Answer", callback_data=f"edit_answer_{question_id}")],
+            [InlineKeyboardButton("Test this Quiz", callback_data=f"test_quiz_{question_id}")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await message.reply_text(preview, reply_markup=reply_markup)
+        
+        # Clear user data
+        context.user_data.pop("poll_to_quiz", None)
+        context.user_data.pop("awaiting_poll_id", None)
+        
+        return
+    
+    # Check if the message is a forwarded poll
+    if message.forward_date and message.poll:
+        poll = message.poll
+        
+        # Extract poll information
+        question_text = poll.question
+        options = [option.text for option in poll.options]
+        
+        # Create keyboard to select the correct answer
+        keyboard = []
+        for i, option in enumerate(options):
+            keyboard.append([InlineKeyboardButton(
+                f"{i+1}. {option}", callback_data=f"polltoquiz_{i}"
+            )])
+        
+        # Store poll info in context.user_data
+        context.user_data["poll_to_quiz"] = {
+            "question": question_text,
+            "options": options
+        }
+        
+        # Ask user to select the correct answer
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await message.reply_text(
+            "📝 I received a poll! I'll convert it to a quiz question.\n\n"
+            f"Question: {question_text}\n\n"
+            "Please select the correct answer:",
+            reply_markup=reply_markup
+        )
+    else:
+        # Regular message handling
+        await message.reply_text(
+            "I can help you manage quiz questions. Try /help to see available commands, "
+            "or forward me a poll to convert it to a quiz question!"
+        )
+
+async def handle_poll_to_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle selection of correct answer for poll to quiz conversion"""
+    query = update.callback_query
+    await query.answer()
+    
+    if not query.data.startswith("polltoquiz_"):
+        return
+    
+    option_id = int(query.data.split("_")[1])
+    poll_data = context.user_data.get("poll_to_quiz")
+    
+    if not poll_data:
+        await query.edit_message_text("Sorry, I couldn't find the poll data. Please try again.")
+        return
+    
+    # Store answer
+    poll_data["selected_answer"] = option_id
+    
+    # Create buttons for ID choice
+    next_id = get_next_question_id()
+    keyboard = [
+        [InlineKeyboardButton(f"Auto ID ({next_id})", callback_data="pollid_auto")],
+        [InlineKeyboardButton("Custom ID", callback_data="pollid_custom")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    # Ask for ID choice
+    await query.edit_message_text(
+        "How would you like to assign an ID to this question?",
+        reply_markup=reply_markup
+    )
+
+async def handle_poll_id_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle selection of ID method for poll conversion"""
+    query = update.callback_query
+    await query.answer()
+    
+    if not query.data.startswith("pollid_"):
+        return
+    
+    choice = query.data.split("_")[1]
+    poll_data = context.user_data.get("poll_to_quiz")
+    
+    if not poll_data:
+        await query.edit_message_text("Sorry, I couldn't find the poll data. Please try again.")
+        return
+    
+    if choice == "auto":
+        # Use auto ID
+        question_id = get_next_question_id()
+        
+        # Create new question
+        new_question = {
+            "id": question_id,
+            "question": poll_data["question"],
+            "options": poll_data["options"],
+            "answer": poll_data["selected_answer"],
+            "category": "Converted Poll"
+        }
+        
+        # Add question to database
+        questions = load_questions()
+        questions.append(new_question)
+        save_questions(questions)
+        
+        # Create a preview of the quiz
+        preview = f"✅ Quiz added with Auto ID: {question_id}\n\n"
+        preview += f"Question: {new_question['question']}\n\nOptions:\n"
+        
+        for i, option in enumerate(new_question['options']):
+            correct_mark = " ✓" if i == poll_data["selected_answer"] else ""
+            preview += f"{i+1}. {option}{correct_mark}\n"
+        
+        # Provide edit options
+        keyboard = [
+            [InlineKeyboardButton("Edit Question", callback_data=f"edit_question_{question_id}")],
+            [InlineKeyboardButton("Edit Options", callback_data=f"edit_options_{question_id}")],
+            [InlineKeyboardButton("Change Answer", callback_data=f"edit_answer_{question_id}")],
+            [InlineKeyboardButton("Test this Quiz", callback_data=f"test_quiz_{question_id}")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        # Send the preview
+        await query.edit_message_text(preview, reply_markup=reply_markup)
+        
+        # Clean up user_data
+        context.user_data.pop("poll_to_quiz", None)
+        
+    elif choice == "custom":
+        # Ask for custom ID
+        await query.edit_message_text(
+            "Please enter the ID number you want to use for this question.\n\n"
+            "Send a number (e.g., 42)."
+        )
+        
+        # Set flag to wait for ID
+        context.user_data["awaiting_poll_id"] = True
+
+
 
 
 
