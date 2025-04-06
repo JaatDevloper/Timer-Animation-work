@@ -523,22 +523,25 @@ async def handle_quiz_url(update: Update, context: ContextTypes.DEFAULT_TYPE, ur
     if not url:
         url = update.message.text
     
+    await update.message.reply_text("Analyzing the quiz link... Please wait.")
+    
     # Parse the URL to extract quiz data
     quiz_data = parse_telegram_quiz_url(url)
     
     if not quiz_data:
+        # If direct parsing failed, ask user to enter quiz details manually
         await update.message.reply_text(
-            "Sorry, I couldn't extract a valid quiz from that link.\n"
-            "Make sure it's a link to a Telegram quiz poll.\n\n"
-            "You can use /add to create a quiz manually."
+            "I couldn't automatically extract the quiz from that link.\n\n"
+            "Let's create it manually. Please send me the question text."
         )
-        return ConversationHandler.END
+        context.user_data["clone_url"] = url  # Store the URL for reference
+        return QUESTION
     
     # Store the parsed data
     context.user_data["quiz_question"] = quiz_data["question"]
     context.user_data["quiz_options"] = quiz_data["options"]
     
-    # Create option buttons for selecting the correct answer
+    # Create option buttons for selecting correct answer
     keyboard = []
     for i, option in enumerate(quiz_data["options"]):
         keyboard.append([InlineKeyboardButton(f"{i+1}. {option}", callback_data=f"answer_{i}")])
