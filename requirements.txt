@@ -6,3 +6,4 @@ pyrogram==2.0.106
 tgcrypto==1.2.5
 trafilatura==1.6.1
 requests==2.31.0
+beautifulsoup4==4.12.2
