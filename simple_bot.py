@@ -1230,42 +1230,19 @@ async def handle_poll_to_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.edit_message_text("Sorry, I couldn't find the poll data. Please try again.")
         return
     
-    # Create new question
-    question_id = get_next_question_id()
-    new_question = {
-        "id": question_id,
-        "question": poll_data["question"],
-        "options": poll_data["options"],
-        "answer": option_id,  # Using the selected option as correct answer
-        "category": "Converted Poll"
-    }
+    # Store the selected answer in user_data
+    poll_data["selected_answer"] = option_id
     
-    # Add question to database
-    questions = load_questions()
-    questions.append(new_question)
-    save_questions(questions)
+    # Ask user to provide a specific ID for this question
+    await query.edit_message_text(
+        "Please send the ID number you want to use for this question.\n\n"
+        "Send a number (e.g., 42) or type 'auto' to automatically assign the next available ID."
+    )
     
-    # Create a preview of the quiz
-    preview = f"✅ Quiz added successfully!\n\nID: {question_id}\n"
-    preview += f"Question: {new_question['question']}\n\nOptions:\n"
+    # Set the state in user_data
+    context.user_data["awaiting_poll_id"] = True
     
-    for i, option in enumerate(new_question['options']):
-        correct_mark = " ✓" if i == option_id else ""
-        preview += f"{i+1}. {option}{correct_mark}\n"
-    
-    # Provide edit options
-    keyboard = [
-        [InlineKeyboardButton("Edit Question", callback_data=f"edit_question_{question_id}")],
-        [InlineKeyboardButton("Edit Options", callback_data=f"edit_options_{question_id}")],
-        [InlineKeyboardButton("Change Answer", callback_data=f"edit_answer_{question_id}")],
-        [InlineKeyboardButton("Test this Quiz", callback_data=f"test_quiz_{question_id}")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    # Clean up user_data
-    context.user_data.pop("poll_to_quiz", None)
-    
-    await query.edit_message_text(preview, reply_markup=reply_markup)
+    # Note: We'll handle the ID input in the handle_message function
 
 async def handle_edit_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle edit selections for converted polls"""
