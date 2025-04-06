@@ -1126,30 +1126,33 @@ def main():
     )
     application.add_handler(clone_quiz_conv)
     
-    # Add conversation handler for quiz editing
-    edit_quiz_conv = ConversationHandler(
-        entry_points=[CommandHandler("edit", edit_quiz)],
+    # Add conversation handler for poll-to-quiz conversion editing
+    edit_poll_quiz_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(handle_edit_selection, pattern=r"^edit_")],
         states={
-            EDIT_SELECT: [CallbackQueryHandler(lambda u, c: None, pattern=r"^edit_")],
-            EDIT_QUESTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, lambda update, context: None)],
-            EDIT_OPTIONS: [MessageHandler(filters.TEXT & ~filters.COMMAND, lambda update, context: None)],
-            EDIT_ANSWER: [CallbackQueryHandler(lambda u, c: None, pattern=r"^editanswer_")]
+            EDIT_QUESTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_edit_text)],
+            EDIT_OPTIONS: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_edit_options)],
+            EDIT_ANSWER: [CallbackQueryHandler(handle_edit_answer, pattern=r"^editanswer_")]
         },
         fallbacks=[CommandHandler("cancel", cancel)]
     )
-    application.add_handler(edit_quiz_conv)
+    application.add_handler(edit_poll_quiz_conv)
     
-    # Add handler for saving forwarded quizzes
-    application.add_handler(CommandHandler("saveforward", save_forward))
+    # Handle poll to quiz conversion
+    application.add_handler(CallbackQueryHandler(handle_poll_to_quiz, pattern=r"^polltoquiz_"))
+    application.add_handler(CallbackQueryHandler(lambda u, c: None, pattern=r"^test_quiz_"))  # Placeholder for test_quiz handler
+    
+    # Add handler for general message handling (including forwarded polls)
+    application.add_handler(MessageHandler(
+        filters.FORWARDED & filters.POLL | filters.TEXT & ~filters.COMMAND, 
+        handle_message
+    ))
     
     # Add callback query handler for button callbacks
     application.add_handler(CallbackQueryHandler(button_callback))
     
     # Start the Bot
     application.run_polling()
-
-if __name__ == '__main__':
-    main()
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle messages sent to the bot"""
