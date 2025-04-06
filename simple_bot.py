@@ -112,35 +112,107 @@ def parse_telegram_quiz_url(url):
             return None
         
         # Try to fetch the webpage content for extracting quiz details
-        response = requests.get(url)
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        }
+        response = requests.get(url, headers=headers)
         if response.status_code != 200:
             return None
             
-        # Simple regex pattern to extract question and options
-        # Note: This is a basic implementation and might need improvement
         content = response.text
-        question_match = re.search(r'<meta property="og:title" content="([^"]+)"', content)
-        if not question_match:
-            return None
-            
-        question = question_match.group(1).strip()
-        options = []
         
-        # Try to extract options from the content
+        # Extract quiz title using meta tags or OpenGraph data
+        title_match = re.search(r'<meta property="og:title" content="([^"]+)"', content)
+        title_match2 = re.search(r'<meta property="twitter:title" content="([^"]+)"', content)
+        description_match = re.search(r'<meta property="og:description" content="([^"]+)"', content)
+        
+        # Extract quiz details from the page
+        quiz_title = None
+        quiz_description = None
+        
+        if title_match:
+            quiz_title = title_match.group(1).strip()
+        elif title_match2:
+            quiz_title = title_match2.group(1).strip()
+            
+        if description_match:
+            quiz_description = description_match.group(1).strip()
+        
+        # Try to extract quiz information from page content
+        # Look for the text that might contain the question
+        question = None
+        if quiz_title and "Quiz" in quiz_title:
+            # Try to extract the actual question from the description
+            if quiz_description:
+                question = quiz_description
+            else:
+                question = quiz_title
+        elif quiz_description:
+            question = quiz_description
+        
+        # If we still don't have a question, look for it in the page content
+        if not question:
+            # Try to find question in HTML content
+            question_container = re.search(r'<div class="tgme_widget_message_text[^>]*>(.*?)</div>', content, re.DOTALL)
+            if question_container:
+                # Clean up HTML tags to get plain text
+                from bs4 import BeautifulSoup
+                soup = BeautifulSoup(question_container.group(1), 'html.parser')
+                question = soup.get_text().strip()
+        
+        # Extract options from the page content
+        options = []
         options_matches = re.findall(r'<div class="tgme_widget_message_poll_option_text">([^<]+)</div>', content)
         if options_matches:
             options = [opt.strip() for opt in options_matches]
-            
+        
+        # If we couldn't find options through typical methods, try a more general approach
+        if not options:
+            # Look for any structured data that might contain options
+            option_containers = re.findall(r'<div class="[^"]*option[^"]*"[^>]*>(.*?)</div>', content, re.DOTALL)
+            if option_containers:
+                from bs4 import BeautifulSoup
+                for container in option_containers:
+                    soup = BeautifulSoup(container, 'html.parser')
+                    option_text = soup.get_text().strip()
+                    if option_text and len(option_text) < 100:  # Reasonable length for an option
+                        options.append(option_text)
+        
+        # Some quizzes might have the question and options embedded in a script tag
+        if not question or not options:
+            script_data = re.search(r'<script[^>]*>.*?({.*?})</script>', content, re.DOTALL)
+            if script_data:
+                try:
+                    import json
+                    # Try to extract JSON data
+                    json_str = script_data.group(1)
+                    # Find valid JSON object within the script
+                    json_match = re.search(r'{.*}', json_str)
+                    if json_match:
+                        json_data = json.loads(json_match.group(0))
+                        # Look for quiz data in JSON
+                        if 'question' in json_data:
+                            question = json_data['question']
+                        if 'options' in json_data and isinstance(json_data['options'], list):
+                            options = json_data['options']
+                except Exception as e:
+                    logger.debug(f"Failed to parse JSON from script tag: {e}")
+        
+        # If we found a question and at least 2 options, create and return the quiz data
         if question and options and len(options) >= 2:
+            logger.info(f"Successfully extracted quiz: {question} with {len(options)} options")
             return {
                 "question": question,
                 "options": options,
                 "answer": 0  # Default to first option, user needs to set the correct answer
             }
+        else:
+            logger.error(f"Failed to extract complete quiz data. Question: {question}, Options count: {len(options) if options else 0}")
             
     except Exception as e:
         logger.error(f"Error parsing Telegram quiz URL: {e}")
     
+    logger.warning(f"Could not parse quiz from URL: {url}")
     return None
 
 def load_users():
