@@ -481,9 +481,7 @@ async def play(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Store the message for reference
         context.user_data["last_question_message_id"] = message.message_id
         
-        # Fix for marathon mode - replace the existing lambda function in the _start_marathon_mode function:
-
-# Schedule the next question using the job queue
+        # Schedule the next question using the job queue
 context.job_queue.run_once(
     lambda job_context: asyncio.run_coroutine_threadsafe(schedule_next_question(context), asyncio.get_event_loop()),
     timer_duration + 3  # Wait for timer + 3 seconds buffer
