@@ -417,7 +417,6 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "You haven't answered any quiz questions yet. Use /play to start a quiz!"
         )
 
-# Updated play function
 async def play(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start a new quiz"""
     command_args = context.args
@@ -467,25 +466,28 @@ async def play(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Get the timer duration for the first question, default to 15 seconds
         timer_duration = first_question.get("timer_duration", 15)
         
-        # Store this timer duration for the next question
-        context.user_data["prev_question_timer"] = timer_duration
-        
         # Send the first question with timer animation
-        await context.bot.send_poll(
+        message = await context.bot.send_poll(
             chat_id=update.effective_chat.id,
             question=first_question["question"],
             options=first_question["options"],
             type=Poll.QUIZ,
             correct_option_id=first_question["answer"],
             is_anonymous=False,
-            explanation="Marathon mode: 1/" + str(len(marathon_questions)),
-            open_period=timer_duration  # Add timer animation
+            explanation=f"Marathon mode: 1/{len(marathon_questions)}",
+            open_period=timer_duration
         )
         
-        # Schedule the next question
-        if context.user_data["marathon_questions"]:
-            await schedule_next_question(context)
-            
+        # Store the message for reference
+        context.user_data["last_question_message_id"] = message.message_id
+        
+        # Schedule the next question using the job queue
+        context.job_queue.run_once(
+            lambda job_context: asyncio.create_task(schedule_next_question(context)),
+            timer_duration + 3  # Wait for timer + 3 seconds buffer
+        )
+        
+        await update.message.reply_text("Marathon mode started! Answer the questions as they appear.")
         return
     
     # Otherwise, try to get the question by ID
@@ -522,7 +524,7 @@ async def play(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "Invalid command format. Use /play for a random quiz, /play marathon for a sequence of quizzes, or /play [ID] for a specific quiz."
         )
-
+        
 async def schedule_next_question(context: ContextTypes.DEFAULT_TYPE):
     """Schedule the next question in the marathon mode after a delay"""
     # Check if we have remaining questions
