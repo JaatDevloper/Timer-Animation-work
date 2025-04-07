@@ -4,7 +4,7 @@ Configuration settings for the Telegram Quiz Bot
 import os
 
 # Bot configuration
-TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '8131829458:AAEC4jLUZFYnm7k9KOOAkP_D-XwhxgB5nGQ')  # Telegram bot token from environment variable
+TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '7631768276:AAEiXbe4berTFnYwYTYdhJebP01_s2XmeiM')  # Telegram bot token from environment variable
 API_ID = os.getenv('API_ID', '28624690')  # Telegram API ID for Pyrogram
 API_HASH = os.getenv('API_HASH', '67e6593b5a9b5ab20b11ccef6700af5b')  # Telegram API Hash for Pyrogram
 OWNER_ID = os.getenv('OWNER_ID', '897155563')  # Telegram User ID of the bot owner
