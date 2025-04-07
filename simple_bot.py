@@ -534,36 +534,40 @@ async def schedule_next_question(context: ContextTypes.DEFAULT_TYPE):
     question = marathon_questions[0]
     chat_id = context.user_data.get("marathon_chat_id")
     
-    # Get timer duration from the previous question, default to 15 seconds if not specified
-    prev_timer_duration = context.user_data.get("prev_question_timer", 15)
+    if not chat_id:
+        # If chat_id is missing, we can't continue
+        return
     
-    # Wait for the duration of the previous question's timer plus 2 seconds buffer
-    await asyncio.sleep(prev_timer_duration + 2)
-    
-    # Get the timer duration for this question
+    # Get the timer duration for the current question, default to 15 seconds
     timer_duration = question.get("timer_duration", 15)
     
-    # Store this timer duration for the next question
-    context.user_data["prev_question_timer"] = timer_duration
+    # Add a slight delay between questions (3 seconds)
+    await asyncio.sleep(3)
     
-    # Send the question with timer
-    await context.bot.send_poll(
+    # Send the question with timer animation
+    message = await context.bot.send_poll(
         chat_id=chat_id,
         question=question["question"],
         options=question["options"],
         type=Poll.QUIZ,
         correct_option_id=question["answer"],
         is_anonymous=False,
-        explanation="Marathon mode quiz",
-        open_period=timer_duration  # Add timer animation
+        explanation=f"Marathon mode quiz ({len(marathon_questions)} remaining)",
+        open_period=timer_duration
     )
+    
+    # Store the message for reference
+    context.user_data["last_question_message_id"] = message.message_id
     
     # Update the remaining questions
     context.user_data["marathon_questions"] = marathon_questions[1:]
     
-    # Schedule the next question if we have more
-    if context.user_data["marathon_questions"]:
-        await schedule_next_question(context)
+    # Schedule the next question using the job queue after the current timer expires
+    # This ensures we wait for the right amount of time
+    context.job_queue.run_once(
+        lambda job_context: asyncio.create_task(schedule_next_question(context)),
+        timer_duration + 3  # Add a 3-second buffer after the timer expires
+    )
 
 async def handle_poll_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler for when a user answers a poll"""
