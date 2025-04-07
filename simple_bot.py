@@ -781,6 +781,7 @@ async def handle_quiz_url(update: Update, context: ContextTypes.DEFAULT_TYPE, ur
     
     return ANSWER
 
+# Updated edit_quiz function
 async def edit_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Edit an existing quiz"""
     command_args = context.args
@@ -823,16 +824,21 @@ async def edit_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard = [
                 [InlineKeyboardButton("Edit Question Text", callback_data="edit_text")],
                 [InlineKeyboardButton("Edit Options", callback_data="edit_options")],
-                [InlineKeyboardButton("Change Correct Answer", callback_data="edit_answer")]
+                [InlineKeyboardButton("Change Correct Answer", callback_data="edit_answer")],
+                [InlineKeyboardButton("Change Timer Duration", callback_data="edit_timer")]  # Add timer option
             ]
             
             reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            # Display timer information if available
+            timer_info = f"Timer: {question.get('timer_duration', 15)} seconds\n\n"
             
             await update.message.reply_text(
                 f"Editing Quiz ID {question_id}:\n\n"
                 f"Question: {question['question']}\n\n"
                 f"Options:\n" + "\n".join(f"{i+1}. {opt}" for i, opt in enumerate(question["options"])) + "\n\n"
                 f"Correct answer: {question['options'][question['answer']]}\n\n"
+                f"{timer_info}"  # Add timer info
                 f"What would you like to edit?",
                 reply_markup=reply_markup
             )
