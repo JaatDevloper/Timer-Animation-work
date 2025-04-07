@@ -565,10 +565,6 @@ async def schedule_next_question(context: ContextTypes.DEFAULT_TYPE):
     context.user_data["marathon_questions"] = marathon_questions[1:]
     
     # Schedule the next question using the job queue after the current timer expires
-    # This ensures we wait for the right amount of time
-    # And also replace the lambda function in the schedule_next_question function:
-
-# Schedule the next question using the job queue after the current timer expires
 # This ensures we wait for the right amount of time
 context.job_queue.run_once(
     lambda job_context: asyncio.run_coroutine_threadsafe(schedule_next_question(context), asyncio.get_event_loop()),
