@@ -568,10 +568,14 @@ async def schedule_next_question(context: ContextTypes.DEFAULT_TYPE):
     
     # Schedule the next question using the job queue after the current timer expires
     # This ensures we wait for the right amount of time
-    context.job_queue.run_once(
-        lambda job_context: asyncio.create_task(schedule_next_question(context)),
-        timer_duration + 3  # Add a 3-second buffer after the timer expires
-    )
+    # And also replace the lambda function in the schedule_next_question function:
+
+# Schedule the next question using the job queue after the current timer expires
+# This ensures we wait for the right amount of time
+context.job_queue.run_once(
+    lambda job_context: asyncio.run_coroutine_threadsafe(schedule_next_question(context), asyncio.get_event_loop()),
+    timer_duration + 3  # Add a 3-second buffer after the timer expires
+)
 
 async def handle_poll_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler for when a user answers a poll"""
