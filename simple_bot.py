@@ -1019,6 +1019,7 @@ async def remove_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "Invalid question ID. Use /list to see available quizzes and their IDs."
             )
 
+# Updated button_callback function
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle button callbacks for quiz deletion confirmation"""
     query = update.callback_query
@@ -1026,7 +1027,40 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     callback_data = query.data
     
-    if callback_data == "cancel_remove":
+    # Handle timer duration selection
+    if callback_data.startswith("edittimer_"):
+        try:
+            timer_duration = int(callback_data.split("_")[1])
+            question = context.user_data.get("edit_question")
+            
+            if not question:
+                await query.edit_message_text("Error: No question being edited.")
+                return
+            
+            # Update timer duration
+            question["timer_duration"] = timer_duration
+            
+            # Save changes to file
+            questions = load_questions()
+            for i, q in enumerate(questions):
+                if q.get("id") == question["id"]:
+                    questions[i] = question
+                    break
+            save_questions(questions)
+            
+            await query.edit_message_text(
+                f"✅ Timer duration updated successfully to {timer_duration} seconds!\n\n"
+                f"Use /play to try it out or /edit to edit another question."
+            )
+            
+            # Clear user data
+            context.user_data.clear()
+            
+        except (ValueError, IndexError):
+            await query.edit_message_text("Error updating timer duration. Please try again.")
+        return
+    
+    elif callback_data == "cancel_remove":
         await query.edit_message_text("Quiz deletion cancelled.")
         return
     
@@ -1064,7 +1098,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     InlineKeyboardButton("❌ No, keep it", callback_data="cancel_remove")
                 ]
             ]
-            
+
             reply_markup = InlineKeyboardMarkup(keyboard)
             
             await query.edit_message_text(
@@ -1085,6 +1119,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await edit_options(update, context)
         elif callback_data == "edit_answer":
             await edit_answer(update, context)
+        elif callback_data == "edit_timer":  # Add timer edit handler
+            await edit_timer(update, context)
         else:
             try:
                 # Handle selecting a question to edit
@@ -1094,7 +1130,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if not question:
                     await query.edit_message_text(f"Error: Question ID {question_id} not found.")
                     return
-                
+
                 # Store the question for editing
                 context.user_data["edit_question"] = question
                 
@@ -1102,20 +1138,25 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 keyboard = [
                     [InlineKeyboardButton("Edit Question Text", callback_data="edit_text")],
                     [InlineKeyboardButton("Edit Options", callback_data="edit_options")],
-                    [InlineKeyboardButton("Change Correct Answer", callback_data="edit_answer")]
+                    [InlineKeyboardButton("Change Correct Answer", callback_data="edit_answer")],
+                    [InlineKeyboardButton("Change Timer Duration", callback_data="edit_timer")]  # Add timer option
                 ]
                 
                 reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                # Display timer information if available
+                timer_info = f"Timer: {question.get('timer_duration', 15)} seconds\n\n"
                 
                 await query.edit_message_text(
                     f"Editing Quiz ID {question_id}:\n\n"
                     f"Question: {question['question']}\n\n"
                     f"Options:\n" + "\n".join(f"{i+1}. {opt}" for i, opt in enumerate(question["options"])) + "\n\n"
                     f"Correct answer: {question['options'][question['answer']]}\n\n"
+                    f"{timer_info}"  # Add timer info
                     f"What would you like to edit?",
                     reply_markup=reply_markup
                 )
-            
+
             except (ValueError, IndexError) as e:
                 await query.edit_message_text(f"Error processing request: {e}")
     
@@ -1139,7 +1180,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if q.get("id") == question.get("id"):
                     questions[i] = question
                     break
-            
+
             save_questions(questions)
             
             # Confirm the changes
