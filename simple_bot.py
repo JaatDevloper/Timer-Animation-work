@@ -530,6 +530,13 @@ async def schedule_next_question(context: ContextTypes.DEFAULT_TYPE):
     # Check if we have remaining questions
     marathon_questions = context.user_data.get("marathon_questions", [])
     if not marathon_questions:
+        # Send a message indicating marathon is complete
+        chat_id = context.user_data.get("marathon_chat_id")
+        if chat_id:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="Marathon complete! All questions have been answered."
+            )
         return
     
     # Get the next question
@@ -543,33 +550,68 @@ async def schedule_next_question(context: ContextTypes.DEFAULT_TYPE):
     # Get the timer duration for the current question, default to 15 seconds
     timer_duration = question.get("timer_duration", 15)
     
+    # Make sure timer_duration is an integer
+    if not isinstance(timer_duration, int):
+        timer_duration = 15
+    
     # Add a slight delay between questions (3 seconds)
     await asyncio.sleep(3)
     
-    # Send the question with timer animation
-    message = await context.bot.send_poll(
-        chat_id=chat_id,
-        question=question["question"],
-        options=question["options"],
-        type=Poll.QUIZ,
-        correct_option_id=question["answer"],
-        is_anonymous=False,
-        explanation=f"Marathon mode quiz ({len(marathon_questions)} remaining)",
-        open_period=timer_duration
-    )
-    
-    # Store the message for reference
-    context.user_data["last_question_message_id"] = message.message_id
-    
-    # Update the remaining questions
-    context.user_data["marathon_questions"] = marathon_questions[1:]
-    
-    # Schedule the next question using the job queue after the current timer expires
-    # This ensures we wait for the right amount of time
-    context.job_queue.run_once(
-        lambda job_context: asyncio.run_coroutine_threadsafe(schedule_next_question(context), asyncio.get_event_loop()),
-        timer_duration + 3  # Add a 3-second buffer after the timer expires
-    )
+    try:
+        # Make sure options is a list and answer is an integer
+        options = question.get("options", [])
+        answer = question.get("answer", 0)
+        
+        if not isinstance(answer, int):
+            try:
+                answer = int(answer)
+            except (ValueError, TypeError):
+                answer = 0
+        
+        # Make sure answer is within the valid range
+        if answer < 0 or answer >= len(options):
+            answer = 0
+        
+        # Send the question with timer animation
+        message = await context.bot.send_poll(
+            chat_id=chat_id,
+            question=question["question"],
+            options=options,
+            type=Poll.QUIZ,
+            correct_option_id=answer,
+            is_anonymous=False,
+            explanation=f"Marathon mode quiz ({len(marathon_questions)} remaining)",
+            open_period=timer_duration
+        )
+        
+        # Store the message for reference
+        context.user_data["last_question_message_id"] = message.message_id
+        
+        # Update the remaining questions
+        context.user_data["marathon_questions"] = marathon_questions[1:]
+        
+        # Schedule the next question using the job queue after the current timer expires
+        # This ensures we wait for the right amount of time
+        context.job_queue.run_once(
+            lambda job_context: asyncio.run_coroutine_threadsafe(schedule_next_question(context), asyncio.get_event_loop()),
+            timer_duration + 3  # Add a 3-second buffer after the timer expires
+        )
+    except Exception as e:
+        # If there's an error processing this question, skip to the next one
+        context.user_data["marathon_questions"] = marathon_questions[1:]
+        
+        # Log the error and notify the user
+        print(f"Error in marathon mode: {e}")
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="Error displaying this question. Moving to the next one..."
+        )
+        
+        # Try the next question after a short delay
+        context.job_queue.run_once(
+            lambda job_context: asyncio.run_coroutine_threadsafe(schedule_next_question(context), asyncio.get_event_loop()),
+            3  # Try again after 3 seconds
+        )
 
 async def handle_poll_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler for when a user answers a poll"""
