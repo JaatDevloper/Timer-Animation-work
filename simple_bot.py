@@ -2066,6 +2066,43 @@ async def handle_poll_id_selection(update: Update, context: ContextTypes.DEFAULT
         # Set flag to wait for ID
         context.user_data["awaiting_poll_id"] = True
 
+# New function to add
+async def edit_timer(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle editing the timer duration"""
+    query = update.callback_query
+    await query.answer()
+    
+    question = context.user_data.get("edit_question")
+    if not question:
+        await query.edit_message_text("Error: No question being edited.")
+        return ConversationHandler.END
+    
+    # Create option buttons for selecting timer duration
+    keyboard = [
+        [
+            InlineKeyboardButton("10 seconds", callback_data="edittimer_10"),
+            InlineKeyboardButton("15 seconds", callback_data="edittimer_15"),
+        ],
+        [
+            InlineKeyboardButton("20 seconds", callback_data="edittimer_20"),
+            InlineKeyboardButton("30 seconds", callback_data="edittimer_30"),
+        ],
+        [
+            InlineKeyboardButton("No timer", callback_data="edittimer_0")
+        ]
+    ]
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(
+        f"Select the new timer duration:\n\n"
+        f"Current duration: {question.get('timer_duration', 15)} seconds\n\n"
+        f"Type /cancel to abort.",
+        reply_markup=reply_markup
+    )
+    
+    return EDIT_ANSWER
+
 
 
 
